@@ -1,7 +1,7 @@
 theory TEE
 begin
 
-builtins:  asymmetric-encryption, signing, diffie-hellman,symmetric-encryption,
+builtins:  asymmetric-encryption, signing, diffie-hellman,symmetric-encryption,hashing
 functions: blind/2, unblind/2
 equations: unblind( sign(blind(m,r),k),r ) = sign(m,k)
            
@@ -174,26 +174,27 @@ rule VF_1:
     in
     [ 
         Fr(~nonce),
-        Verifier_02(VF, id_VF,k_dh,vf_cert,root_cert, private_key_vf, DH_sk_VF, PV, pv_public_key, Coordinator, coordinator_public_key,)
+        Verifier_02($VF,k_dh,vf_cert,root_cert, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
   --[ 
         Step4(VF, PV, ~nonce)
      ]->
     [   Out(ct),
-        Verifier_03(VF, id_VF,k_dh,vf_cert,root_cert,~nonce, private_key_vf, DH_sk_VF, PV, pv_public_key, Coordinator, coordinator_public_key,)
+        Verifier_03($VF,k_dh,vf_cert,root_cert,~nonce, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
 
 rule PV_1:
     let
         nonce = sdec(ct,k_dh)
         msg1 = <report,nonce>
-        bm1 = blind(msg1,k_dh)
-        msg2 = <id_PV,pv_cert,bm1>
+        bm1 = blind(<H(<msg1>),k_dh>,~r)
+        msg2 = <$PV,pv_cert,bm1>
         sig = sign(msg2,private_key_pv)
         flow_1 = <report,sig,msg2>
     in
     [   In(ct),
-        Prover_02(PV, id_PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, Coordinator, coordinator_public_key, VF, vf_public_key),
+        Fr(~r),
+        Prover_02($PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key),
         !Get_expected_SML(report)
      ]
     --[ 
@@ -201,18 +202,18 @@ rule PV_1:
         Honest(VF),
         AttestStarted(PV,nonce,report),
         Running(PV,VF,nonce),
-        Step5(PV,VF,nonce)
+        Step5(PV,VF,nonce,report)
     ]->
     [ 
         Out(flow_1),
-        Prover_03(bm1,report,msg1,PV, id_PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, Coordinator, coordinator_public_key, VF, vf_public_key)
+        Prover_03($PV,~r, k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
     ]
 
 rule Coordinator_1:          //attest := 'success'
     let
-        msg2 = <id_PV,pv_cert,bm1>
+        msg2 = <$PV,pv_cert,bm1>
     in
-   [    Coordinator_01( Coordinator, id_Coor, private_key_coordinator, PV, pv_public_key, VF, vf_public_key),
+   [    Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
         In(<report,sig,msg2>),
         !Get_expected_SML(report)
    ]
@@ -225,7 +226,7 @@ rule Coordinator_1:          //attest := 'success'
         // Step6(Coordinator,PV,bm1)
    ]->
   [ 
-        Coordinator_02( Coordinator,'success',bm1, id_Coor, private_key_coordinator, PV, pv_public_key, VF, vf_public_key)
+        Coordinator_02($Coordinator, 'success', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
    ]
 
 rule Coordinator_deny:       //attest := 'failure'
@@ -233,14 +234,14 @@ rule Coordinator_deny:       //attest := 'failure'
         msg2 = <id_PV,pv_cert,bm1>
   in
   [ 
-        Coordinator_01( Coordinator, id_Coor, private_key_coordinator, PV, pv_public_key, VF, vf_public_key),
-        In(<report,sig,msg2>)
+        Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
+        In(<report,$PV,sig,msg2>)//多一个变量
    ]
   --[ 
         Eq(verify(sig,msg2,pv_public_key),true)
    ]->
   [     
-        Coordinator_02( Coordinator,'failure',bm1, id_Coor, private_key_coordinator, PV, pv_public_key, VF, vf_public_key)
+        Coordinator_02($Coordinator, 'failure', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
 ]
 
 rule Coordinator_2:
@@ -248,7 +249,7 @@ rule Coordinator_2:
         btk = sign(bm1,private_key_coordinator)
     in
     [ 
-        Coordinator_02( Coordinator,attest,bm1, id_Coor, private_key_coordinator, PV, pv_public_key, VF, vf_public_key)
+        Coordinator_02($Coordinator, attest, bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
      ]
     --[ 
         AttestCreated(Coordinator,PV,attest),
@@ -257,23 +258,23 @@ rule Coordinator_2:
      ]->
     [ 
         Out(<attest,btk>),
-        Coordinator_03( Coordinator,attest, id_Coor, private_key_coordinator, PV, pv_public_key, VF, vf_public_key)
+        Coordinator_03($Coordinator, attest, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
      ]
 
 rule PV_2:
     let
-        utk = unblind(btk,k_dh)
+        utk = unblind(btk,r)
+        msg1 = <report,nonce>
     in
     [ 
         In(<attest,btk>),
-        Prover_03(bm1,report,msg1,PV, id_PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, Coordinator, coordinator_public_key, VF, vf_public_key)
+        Prover_03($PV,r, k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
      ]
     --[
-        Eq(verify(btk,bm1,coordinator_public_key),true),
-        Eq(verify(utk,msg1,coordinator_public_key),true),
+        // Eq(verify(btk,bm1,coordinator_public_key),true),
+        Eq(verify(utk,<H(msg1),k_dh>,coordinator_public_key),true),
         Step8(PV,Coordinator,VF,attest),
-        NotifiedCompletion(PV, Coordinator, attest),
-        Honest(Coordinator)
+        NotifiedCompletion(PV, Coordinator, attest)
       ]->
     [ 
         Out(<attest,btk,report>)
@@ -281,16 +282,14 @@ rule PV_2:
 
 rule VF_2:
     let
-        bm1 = blind(<report,nonce>,k_dh)
-        utk = unblind(btk,k_dh)
+        // bm1 = blind(<report,nonce>,k_dh)
+        // utk = unblind(btk,k_dh)
     in
     [ 
         In(<attest,btk,report>),
-        Verifier_03(VF, id_VF,k_dh,vf_cert,root_cert,nonce, private_key_vf, DH_sk_VF, PV, pv_public_key, Coordinator, coordinator_public_key),
-        !Get_private_key(PV, private_key_prover),
-        !Get_private_key(Coordinator, private_key_coordinator)
-        
-
+        Verifier_03($VF,k_dh,vf_cert,root_cert,nonce, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key),
+        !Get_private_key($PV, private_key_prover),
+        !Get_private_key($Coordinator, private_key_coordinator)
     ]
     --[ 
         Eq(verify(btk,bm1,coordinator_public_key),true),
