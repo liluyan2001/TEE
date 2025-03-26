@@ -1,6 +1,7 @@
 theory TEE
 begin
 
+
 builtins:  asymmetric-encryption, signing, diffie-hellman,symmetric-encryption,hashing
 functions: blind/2, unblind/2
 equations: unblind( sign(blind(m,r),k),r ) = sign(m,k)
