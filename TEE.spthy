@@ -60,7 +60,11 @@ rule Init_Coordinator:
     [ 
       !Get_private_key($Coordinator, private_key_coordinator)
     ]
+<<<<<<< HEAD
   --[ Create($Coordinator,'Coordinator'),
+=======
+  --[ Create($Coordinator,'Coordinator')
+>>>>>>> 2cbd1410716ef36d75bf0958ac479381c61e2b4a
       OnlyOnceV(<$Coordinator,'Init'>) ]->
     [ Coordinator_0( $Coordinator, private_key_coordinator) ]
 

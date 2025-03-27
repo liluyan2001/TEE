@@ -1,0 +1,598 @@
+/*
+
+Remote attestation Protocol Three-Agent Simple
+============================================
+Authors: Johannes Wilson
+Date:       2023-10-31
+
+Trusted:
+    AttAg, VF and AS (Attestation Server)
+Untrusted:
+    Target, PV_ch (TrustZone channel) and ch (channel)
+
+   prover           verifier
+-----------  ch  ---------
+| Target  |------|   VF  |
+-----------      ---------
+     | PV_ch \ ch    | ch
+-----------   \  ---------
+|  AttAg  |    \ |   AS  |
+-----------      ---------
+
+
+1:  VF 	-> Target: 		     attest_request(<prover, server, nonce1>, vf_key.sign(<prover, server, nonce1>))
+2:  Target -> VF:          nonce_challenge(server, nonce1, nonce2)
+                           nonce := <nonce1, nonce2>
+3:  VF  -> Target:         nonce_confirmed(<server, nonce>, vf_key.sign(<server, nonce>))
+4:  Target	-> AttAg: 		 start_attestation(nonce)
+         				           quote := <nonce, SML>
+5:  AttAg -> Target: 		   attestation(quote, att_key.sign(quote))
+6:  Target -> AS:          send_quote(quote, att_key.sign(quote))              
+7:  AS:                    verdict := verify(SML)
+8:  AS  -> Target:         send_result(nonce, verdict)
+9:  Target -> VF:          notify_completion(nonce)
+10: VF  -> AS:             get_verdict(<server, nonce>, vf_key.sign(<server, nonce>))
+11: AS  -> VF:             verdict(nonce, prover, verdict)
+12: VF:                    commit
+
+*/
+
+theory ThreeAgent
+begin
+
+builtins: asymmetric-encryption, signing
+
+// ****************** Keys ******************
+
+rule Register_pk:           // Registering a public key
+    [ Fr(~private_key) ]
+  --[ KeyReg( $A ) ]->
+    [ 
+      !Get_private_key($A, ~private_key), 
+      !Get_public_key($A, pk(~private_key)),
+      Out(pk(~private_key))
+    ]
+
+rule Reveal_private_key:    // Revealing private key
+    [ !Get_private_key(A, private_key) ]
+  --[ PrivateKeyRevealed(A) ]->
+    [ Out(private_key) ]
+
+// ****************** Prover Channel ******************
+
+rule ChanOut_PV [colour=ffffff]:
+    [ Out_PV(A,x) ]
+    -->
+    [ Out(<A,x>) ]
+
+rule ChanIn_PV [colour=ffffff]:
+    [ In(<A,x>) ]
+    -->
+    [ In_PV(A,x) ]
+
+
+// ****************** Roles ******************
+
+rule Init_Attestation_Database:
+    [ Fr(SML) ]
+  --[ ]->
+    [ !Get_expected_SML(SML), Out(SML) ]
+
+rule Init_VF:
+    [ 
+      Fr(~id), 
+      !Get_private_key($VF, private_key_vf),
+      !Get_public_key($prover, prover_public_key),
+      !Get_public_key($server, server_public_key)
+    ]
+  --[ Create(~id, $VF) ]->
+    [ Verifier_0($VF, ~id, private_key_vf, $prover, $server, server_public_key) ]
+
+rule Init_Target:
+    [ 
+      Fr(~id_Target),
+      !Get_private_key($prover, private_key_prover),
+      !Get_public_key($VF, vf_public_key),
+      !Get_public_key($server, server_public_key)
+    ]
+  --[ Create(~id_Target, $prover) ]->
+    [ 
+      Target_0($prover, ~id_Target, $VF, vf_public_key, $server, server_public_key)
+    ] 
+
+rule Init_AttAg:
+    [ 
+      Fr(~id_AttAg),
+      !Get_private_key($prover, private_key_prover)
+    ]
+  --[ Create(~id_AttAg, $prover) ]->
+    [ 
+      AttAg_0($prover, ~id_AttAg, private_key_prover)      
+    ]  
+
+rule Init_AS:
+    [ 
+      Fr(~id),
+      !Get_private_key($AS, private_key),
+      !Get_public_key($prover, prover_public_key),
+      !Get_public_key($VF, vf_public_key)
+    ]
+  --[ Create(~id, $AS) ]->
+    [ Server_0( $AS, ~id, private_key, $prover, prover_public_key, $VF, vf_public_key) ]
+
+// ****************** Protocol ******************
+
+/*
+1:  VF 	-> Target: 		attest_request(<prover, server, nonce1>, vf_key.sign(<prover, server, nonce1>))
+*/
+rule VF_01 [colour=#adfaff]:
+    let m = <'attest_request', prover, server, ~nonce> in
+    [ 
+      Fr(~nonce), // Generate fresh nonce
+      Verifier_0(VF, id, private_key_vf, prover, server, server_public_key)
+    ]
+  --[ 
+      ProtocolStarted(VF, prover, ~nonce), 
+      Step1(VF, prover, server, ~nonce, pk(private_key_vf)) 
+    ]->
+    [ 
+      Verifier_01( VF, id, private_key_vf, ~nonce, prover, server, server_public_key ),
+      Out( <m, sign(m, private_key_vf)> )
+    ]
+
+/*
+2:  Target -> VF:          challenge_nonce(nonce1, nonce2)
+*/
+rule Target_01 [colour=#ff9900]:
+    let m = <'attest_request', prover, server, nonce1> in
+    [
+      In( <m, sig> ),
+      Target_0(prover, id_Target, VF, vf_public_key, server, server_public_key),
+      Fr(~nonce2) // generate nonce of our own
+    ]
+  --[ 
+      Eq(verify(sig, m, vf_public_key), true),
+      Step2(VF, prover, server, nonce1, ~nonce2, vf_public_key)
+    ]->
+    [ 
+      Out( <'nonce_challenge', server, <nonce1, ~nonce2>> ), // send back our nonce
+      Target_01(prover, id_Target, VF, vf_public_key, nonce1, ~nonce2, server, server_public_key)
+    ]
+
+/*
+3:  VF  -> Target:         nonce_confirmed(<server, nonce>, vf_key.sign(<server, nonce>))
+*/
+rule VF_1 [colour=#adfaff]:
+    let 
+        nonce = <nonce1, nonce2>
+        m = <'nonce_challenge', server, nonce>
+        r = <'nonce_confirmed', server, nonce>
+    in
+    [
+      In( m ),
+      Verifier_01( VF, id, private_key_vf, nonce1, prover, server, server_public_key  )
+    ]
+  --[ 
+      NonceConfirmed(VF, prover, nonce), 
+      Step3(VF, prover, server, nonce1, nonce2, pk(private_key_vf)) 
+    ]->
+    [
+      Verifier_1( VF, id, private_key_vf, nonce, prover, server, server_public_key ),
+      Out( <r, sign(r, private_key_vf)> )
+    ]
+
+/*
+4:  Target	-> AttAg: 		start_attestation(nonce)
+*/
+rule Target_1 [colour=#ff9900]:
+    let 
+        m = <'nonce_confirmed', server, <nonce1, nonce2>>
+        nonce = <nonce1, nonce2>
+    in
+    [
+      In( <m, sig> ),
+      Target_01(prover, id_Target, VF, vf_public_key, nonce1, nonce2, server, server_public_key)
+    ]
+  --[ 
+      Eq(verify(sig, m, vf_public_key), true),
+      Step4(VF, prover, server, nonce1, nonce2, vf_public_key)
+    ]->
+    [ 
+      Out_PV( prover, nonce ),
+      Target_1(prover, id_Target, VF, nonce, server, server_public_key)
+    ]
+
+/*
+5:  AttAg -> Target: 		attestation(quote, att_key.sign(quote))
+*/
+rule AttAg_1 [colour=#c90000]:
+    let m = <nonce, SML>
+    in
+    [
+      In_PV( prover, nonce ),
+      AttAg_0(prover, id_AttAg, private_key_prover),
+      !Get_expected_SML(SML)
+    ]
+  --[ 
+      QuoteCreated(prover, nonce, SML),
+      AttestStarted(prover, nonce),
+      Step5(prover, nonce)
+    ]->
+    [
+      Out_PV( prover, <m, sign(m, private_key_prover)> )
+    ]
+
+/*
+6:  Target -> AS:          send_quote(quote, att_key.sign(quote))
+*/
+rule Target_2 [colour=#ff9900]:
+    let m = <nonce, SML> in
+    [ 
+      In_PV( prover, <m, sig> ),
+      Target_1(prover, id_Target, VF, nonce, server, server_public_key)
+    ]
+  --[ 
+      Honest(prover), 
+      Honest(VF), 
+      Running(prover, VF, nonce),
+      Step6(VF, prover, server, nonce) 
+    ]->
+    [ 
+      Out( <'send_quote', <m, sig>> ), // this channel should be encrypted in a real protocol to leak less information, likely using TLS
+      Target_2(prover, id_Target, VF, nonce, server, server_public_key)
+    ]
+
+/*
+7:  AS:                 verdict := 'success'
+*/
+rule AS_1 [colour=#da6bff]:
+    let m = <nonce, SML> in
+    [
+      Server_0( AS, id, private_key, prover, prover_public_key, VF, vf_public_key ),
+      In( <'send_quote', <m, sig>> ),
+      !Get_expected_SML(SML)
+    ]
+  --[
+      Eq(verify(sig, m, prover_public_key), true),
+      Commit_SML(AS, prover, nonce, SML),
+      Honest(AS),
+      Honest(prover),
+      Step7(prover, AS, nonce)
+    ]->
+    [ 
+      Server_1( AS, id, private_key, nonce, prover, 'success', VF, vf_public_key)
+    ]
+
+/*
+7:  AS:                 verdict := 'failure'
+*/
+rule AS_deny [colour=#da6bff]:
+    let m = <nonce, SML> in
+    [
+      Server_0( AS, id, private_key, prover, prover_public_key, VF, vf_public_key ),
+      In( <'send_quote', AS, <m, sig>> )
+    ]
+  --[
+      Eq(verify(sig, m, prover_public_key), true)
+    ]->
+    [ 
+      Server_1( AS, id, private_key, nonce, prover, 'failure', VF, vf_public_key)
+    ]
+
+/*
+8:  AS  -> Target:         send_result(nonce, verdict)
+*/
+rule AS_2 [colour=#da6bff]:
+    let r = <'result', nonce, verdict> in
+    [
+      Server_1( AS, id, private_key, nonce, prover, verdict, VF, vf_public_key)
+    ]
+  --[
+      VerdictCreated(AS, prover, nonce, verdict),
+      Step8(prover, AS, nonce, verdict)
+    ]->
+    [
+      Out(<r, sign(r, private_key)>),
+      Server_2(AS, id, private_key, nonce, prover, verdict, VF, vf_public_key)
+    ]
+
+/*
+9:  Target -> VF:          notify_completion(nonce)
+*/
+rule Target_3 [colour=#ff9900]:
+    let m = <'result', nonce, verdict> in
+    [
+      Target_2(prover, id_Target, VF, nonce, server, server_public_key),
+      In(<m, sig>)
+    ]
+  --[ 
+      Eq(verify(sig, m, server_public_key), true),
+      Step9(VF, prover, server, nonce, verdict),
+      NotifiedCompletion(prover, server, nonce, verdict),
+      Honest(server)
+    ]->
+    [
+      Out(<'notify_completion', nonce>)
+    ]
+
+/*
+10: VF  -> AS:          get_verdict(<server, nonce>, vf_key.sign(<server, nonce>))
+*/
+rule VF_2 [colour=#adfaff]:
+    let m = <'get_verdict', server, nonce> in 
+    [
+      Verifier_1( VF, id, private_key_vf, nonce, prover, server, server_public_key ),
+      In(<'notify_completion', nonce>)
+    ]
+  --[ Step10(VF, prover, server, nonce) ]->
+    [
+      Out(<m, sign(m, private_key_vf)>),
+      Verifier_2( VF, id, private_key_vf, nonce, prover, server, server_public_key)
+    ]
+
+/*
+11: AS  -> VF:          verdict(nonce, prover, verdict)
+*/
+rule AS_3 [colour=#da6bff]:
+    let 
+        m = <'get_verdict', server, nonce>
+        r = <'verdict', nonce, prover, verdict> 
+    in
+    [
+      Server_2(AS, id, private_key, nonce, prover, verdict, VF, vf_public_key),
+      !Get_public_key(VF, vf_public_key),
+      In(<m, sig>)
+    ]
+  --[
+      Eq(verify(sig, m, vf_public_key), true),
+      Step11(VF, prover, AS, nonce, verdict)
+    ]->
+    [
+      Out(<r, sign(r, private_key)>)
+    ]
+
+/*
+12: VF:                 commit
+*/
+rule VF_3 [colour=#adfaff]:
+    let m = <'verdict', nonce, prover, verdict> in
+    [
+      Verifier_2( VF, id, private_key_vf, nonce, prover, server, server_public_key ),
+      !Get_public_key(server, server_public_key),
+      In(<m, sig>),
+      !Get_private_key(prover, prover_key),
+      !Get_private_key(server, server_key)
+    ]
+  --[
+      Eq(verify(sig, m, server_public_key), true),
+      Commit(VF, prover, nonce, verdict),
+      VerdictRecieved(VF, server, prover, nonce, verdict),
+      Honest(VF),
+      Honest(server),
+      Honest(prover),
+      Step12(VF, prover, server, nonce, verdict),
+      Secret(private_key_vf),
+      Secret(prover_key),
+      Secret(server_key)
+    ]->
+    []
+
+
+// ****************** Restrictions ******************
+
+// Actions marked with Eq should equal (used for ensuring signarute matches)
+restriction equality:
+    "All x y #i. Eq(x,y) @i ==> x = y"
+
+// Once a key has been generated for a prover or verifier, they should not be
+// able to replace it by a new one
+restriction private_key_unique:
+    "All x #i #j. KeyReg(x) @#i & KeyReg(x) @#j 
+        ==> #i = #j"
+
+// ****************** Security Properties ******************
+
+
+/*
+* Correctness Trace
+* 
+* We verify for all models that there is a trace where the protocol completes
+* where every step of the trace happens exactly in the expected order
+*/
+lemma correctness_trace:
+    exists-trace
+    "Ex VF prover server nonce1 nonce2 vf_public_key id_VF id_Target id_AttAg id_server
+        #a #b #c #d #e #f #g #i #j #k #l #m #n #o #p #q.
+        Step1(VF, prover, server, nonce1, vf_public_key) @a &
+        Step2(VF, prover, server, nonce1, nonce2, vf_public_key) @b & (a < b) &
+        Step3(VF, prover, server, nonce1, nonce2, vf_public_key) @c & (b < c) &
+        Step4(VF, prover, server, nonce1, nonce2, vf_public_key) @d & (c < d) &
+        Step5(prover, <nonce1, nonce2>) @e & (d < e) &
+        Step6(VF, prover, server, <nonce1, nonce2>) @f & (e < f) &
+        Step7(prover, server, <nonce1, nonce2>) @g & (f < g) &
+        Step8(prover, server, <nonce1, nonce2>, 'success') @i & (g < i) &
+        Step9(VF, prover, server, <nonce1, nonce2>, 'success') @j & (i < j) &
+        Step10(VF, prover, server, <nonce1, nonce2>) @k & (j < k) &
+        Step11(VF, prover, server, <nonce1, nonce2>, 'success') @l & (k < l) &
+        Step12(VF, prover, server, <nonce1, nonce2>, 'success') @m & (l < m) &
+        Create(id_VF, VF) @n &
+        Create(id_Target, prover) @o &
+        Create(id_AttAg, prover) @p &
+        Create(id_server, server) @q
+            & not(Ex id agent #s. Create(id, agent) @s & not(#s = #n) & not(#s = #o) & not(#s = #p) & not(#s = #q)) 
+            & not(Ex A #r. PrivateKeyRevealed(A) @r)"
+
+
+// Aliveness
+lemma aliveness_verif_attag:
+    "All VF prover nonce verdict #i. 
+        Commit(VF, prover, nonce, verdict) @i 
+        ==>  ( Ex nonce2 #j. AttestStarted(prover, nonce2) @j ) 
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// One-Way Non-Injective Agreement
+lemma o_w_n_i_agree_verif_attag:
+    "All VF prover nonce verdict #i. 
+        Commit(VF, prover, nonce, verdict) @i 
+        ==>  ( Ex #j. AttestStarted(prover, nonce) @j ) 
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// One-Way Injective Agreement
+lemma o_w_i_agree_verif_attag:
+    "All VF prover nonce verdict #i. 
+        Commit(VF, prover, nonce, verdict) @i 
+        ==>  ( Ex #j. AttestStarted(prover, nonce) @j
+                & j < i 
+                & not (Ex VF2 prover2 #i2. Commit(VF2, prover2, nonce, verdict) @i2
+                    & not (#i2 = #i)))
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+/*
+================================
+Freshness of Attestation Data
+================================
+*/
+
+// L1 One Way Injective Agreement - Verifier - Attestation Agent
+lemma o_w_r_i_agree_verif_attag:
+    "All VF prover nonce1 nonce2 verdict #i. 
+        Commit(VF, prover, <nonce1, nonce2>, verdict) @i
+        ==>  ( Ex #j #k. AttestStarted(prover, <nonce1, nonce2>) @j
+                & ProtocolStarted(VF, prover, nonce1) @k
+                & k < j
+                & j < i
+                & not (Ex VF2 prover2 #i2. Commit(VF2, prover2, <nonce1, nonce2>, verdict) @i2
+                    & not (#i2 = #i)))
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+/*
+================================
+Integrity of Attestation Data
+================================
+*/
+
+// L2 One-Way Non-Injective Agreement - Server - Attestation Agent
+lemma o_w_non_i_agree_server_attag:
+    "All AS prover nonce SML #i. 
+        Commit_SML(AS, prover, nonce, SML) @i
+        ==>  ( Ex #j. QuoteCreated(prover, nonce, SML) @j )
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+/*
+===========================
+Authenticity of Verifier
+===========================
+*/
+
+// Aliveness
+lemma aliveness_target_verif:
+    "All prover VF nonce #i.  
+        Running(prover, VF, nonce) @i 
+        ==>  ( Ex prover2 nonce2 #j. NonceConfirmed(VF, prover2, nonce2) @j ) 
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// Weak Agreement
+lemma w_agreement_target_verif:
+    "All prover VF nonce #i. 
+        Running(prover, VF, nonce) @i 
+        ==>  ( Ex prover nonce2 #j. NonceConfirmed(VF, prover, nonce2) @j ) 
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// Non-Injective Agreement
+lemma n_i_agreement_target_verif:
+    "All prover VF nonce #i. 
+        Running(prover, VF, nonce) @i 
+        ==>  ( Ex #j. NonceConfirmed(VF, prover, nonce) @j ) 
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// L3 Injective Agreement - Target - Verifier
+lemma inj_agree_target_verif:
+    "All prover VF nonce #i. 
+        Running(prover, VF, nonce)  @i 
+        ==>  ( Ex #j. NonceConfirmed(VF, prover, nonce) @j
+                & j < i 
+                & not (Ex prover2 VF2 #i2. Running(prover2, VF2, nonce) @i2
+                    & not (#i2 = #i)))
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+/*
+===================================
+Integrity of Attestation Verdict
+===================================
+*/
+
+// One-Way Non-Injective Agreement - Target - Server
+lemma o_w_n_i_agree_target_server:
+    "All prover server nonce verdict #i.
+      NotifiedCompletion(prover, server, nonce, verdict) @i
+      ==> ( Ex prover2 #j. VerdictCreated(server, prover2, nonce, verdict) @j )
+      | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// L4 One-Way Injective Agreement - Target - Server
+lemma o_w_i_agree_target_server:
+    "All prover server nonce verdict #i.
+      NotifiedCompletion(prover, server, nonce, verdict) @i
+      ==> ( Ex prover2 #j. VerdictCreated(server, prover2, nonce, verdict) @j 
+            & j < i
+            & not (Ex prover3 server2 #i2. NotifiedCompletion(prover3, server2, nonce, verdict) @i2 
+                & not(#i2 = #i)))
+      | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+
+// One-Way Non-Injective Agreement - Verifier - Server
+lemma o_w_non_i_agree_verif_server:
+    "All VF AS prover nonce verdict #i. 
+        VerdictRecieved(VF, AS, prover, nonce, verdict) @i 
+        ==>  ( Ex AS #j. VerdictCreated(AS, prover, nonce, verdict) @j )
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+// L5 One-Way Injective Agreement - Verifier - Server
+lemma o_w_i_agree_verif_server:
+    "All VF AS prover nonce verdict #i. 
+        VerdictRecieved(VF, AS, prover, nonce, verdict) @i 
+        ==>  ( Ex AS #j. VerdictCreated(AS, prover, nonce, verdict) @j
+                & j < i 
+                & not (Ex VF2 AS2 #i2. VerdictRecieved(VF2, AS2, prover, nonce, verdict) @i2
+                    & not (#i2 = #i)))
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+/*
+===========================
+Secrecy
+===========================
+*/
+
+// L6 Secrecy Attestation Keys
+lemma secrecy_key:
+    "All x #i.
+        Secret(x) @i 
+        ==> not (Ex #j. K(x) @j)
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+end
+
+/*
+tamarin-prover 1.6.1
+==============================================================================
+summary of summaries:
+
+analyzed: threeagent.spthy
+
+  correctness_trace (exists-trace): verified (38 steps)
+  aliveness_verif_attag (all-traces): verified (28 steps)
+  o_w_n_i_agree_verif_attag (all-traces): verified (28 steps)
+  o_w_i_agree_verif_attag (all-traces): verified (44 steps)
+  o_w_r_i_agree_verif_attag (all-traces): verified (56 steps)
+  o_w_non_i_agree_server_attag (all-traces): verified (7 steps)
+  aliveness_target_verif (all-traces): verified (7 steps)
+  w_agreement_target_verif (all-traces): verified (7 steps)
+  n_i_agreement_target_verif (all-traces): verified (10 steps)
+  inj_agree_target_verif (all-traces): verified (16 steps)
+  o_w_n_i_agree_target_server (all-traces): verified (7 steps)
+  o_w_i_agree_target_server (all-traces): verified (15 steps)
+  o_w_non_i_agree_verif_server (all-traces): verified (10 steps)
+  o_w_i_agree_verif_server (all-traces): verified (18 steps)
+  secrecy_key (all-traces): verified (20 steps)
+
+==============================================================================
+*/
