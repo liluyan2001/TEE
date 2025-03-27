@@ -41,7 +41,8 @@ rule Init_VF:
       !Get_private_key($VF, private_key_vf),
       !Get_public_key($Coordinator, coordinator_public_key)
     ]
-  --[ Create($VF,'Verifier') ]->
+  --[ Create($VF,'Verifier'),
+      OnlyOnceV(<$VF,'Init'>) ]->
     [ Verifier_0($VF, private_key_vf, ~DH_sk_VF, $Coordinator, coordinator_public_key) 
     ]
 
@@ -51,7 +52,8 @@ rule Init_PV:
       !Get_private_key($PV, private_key_pv),
       !Get_public_key($Coordinator, coordinator_public_key)
     ]
-  --[ Create($PV,'Prover') ]->
+  --[ Create($PV,'Prover'),
+      OnlyOnceV(<$PV,'Init'>) ]->
     [ Prover_0( $PV, private_key_pv, ~DH_sk_PV,  $Coordinator, coordinator_public_key)
     ]
 
@@ -59,7 +61,8 @@ rule Init_Coordinator:
     [ 
       !Get_private_key($Coordinator, private_key_coordinator)
     ]
-  --[ Create($Coordinator,'Coordinator') ]->
+  --[ Create($Coordinator,'Coordinator')
+      OnlyOnceV(<$Coordinator,'Init'>) ]->
     [ Coordinator_0( $Coordinator, private_key_coordinator) ]
 
 
@@ -67,6 +70,13 @@ restriction AgentOnlyBeOneRole:
 "
 All agent role1 role2 #i #j. Create(agent,role1) @i & Create(agent,role2) @j ==> role1 = role2
 "
+
+
+restriction OnlyOnceV:
+"
+All #i #j x. OnlyOnceV(x) @#i & OnlyOnceV(x) @#j ==> #i = #j
+"
+
 
 
 // ****************** Secure Channel Used to Register Certificate ******************
