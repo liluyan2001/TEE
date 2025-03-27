@@ -197,7 +197,6 @@ rule PV_RG_02 [colour=#ff9900]:
         Prover_02($PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
     ]
 
-
 // ****************** Protocol ******************
 
 //VF -> PV senc(nonce,k_dh)
