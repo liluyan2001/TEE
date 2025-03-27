@@ -41,7 +41,7 @@ rule Init_VF:
       !Get_private_key($VF, private_key_vf),
       !Get_public_key($Coordinator, coordinator_public_key)
     ]
-  --[ Create($VF) ]->
+  --[ Create($VF,'Verifier') ]->
     [ Verifier_0($VF, private_key_vf, ~DH_sk_VF, $Coordinator, coordinator_public_key) 
     ]
 
@@ -51,7 +51,7 @@ rule Init_PV:
       !Get_private_key($PV, private_key_pv),
       !Get_public_key($Coordinator, coordinator_public_key)
     ]
-  --[ Create($PV) ]->
+  --[ Create($PV,'Prover') ]->
     [ Prover_0( $PV, private_key_pv, ~DH_sk_PV,  $Coordinator, coordinator_public_key)
     ]
 
@@ -59,8 +59,14 @@ rule Init_Coordinator:
     [ 
       !Get_private_key($Coordinator, private_key_coordinator)
     ]
-  --[ Create($Coordinator) ]->
+  --[ Create($Coordinator,'Coordinator') ]->
     [ Coordinator_0( $Coordinator, private_key_coordinator) ]
+
+
+restriction AgentOnlyBeOneRole:
+"
+All agent role1 role2 #i #j. Create(agent,role1) @i & Create(agent,role2) @j ==> role1 = role2
+"
 
 
 // ****************** Secure Channel Used to Register Certificate ******************
@@ -320,14 +326,14 @@ restriction private_key_unique:
 lemma correctness_trace:
      exists-trace
 "
-    Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert 
-       #a #b #c  #m #n #o.
-    //    nonce report   k_dh
-    //      #d #e #f #g #i #j #k #l
+    Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert k_dh
+       #a #b #c #d #m #n #o.
+    //    nonce report   
+    //       #e #f #g #i #j #k #l
        Step1_VF(VF,Coordinator,vf_public_key) @a &
        Step1_PV(PV,Coordinator,pv_public_key) @b &(a<b) &
        Step2(Coordinator,PV,VF,root_cert,vf_cert,pv_cert) @c &(b<c) &
-    //    Step3_VF(VF,Coordinator,k_dh,root_cert,vf_cert) @d & (c<d) &
+       Step3_VF(VF,Coordinator,k_dh,root_cert,vf_cert) @d & (c<d) &
     //    Step3_PV(PV,Coordinator,k_dh,root_cert,pv_cert) @e &(d<e) &
     //    Step4(VF, PV, nonce) @f & (e<f) &
     //    Step5(PV,VF,nonce,report) @g & (f<g) &
@@ -335,10 +341,10 @@ lemma correctness_trace:
     //    Step7(PV,Coordinator) @j & (i<j) &
     //    Step8(PV,Coordinator,VF,'success') @k & (j<k) &
     //    Step9(VF, PV, Coordinator, nonce, 'success') @l & (k<l)&
-       Create(VF) @m &
-       Create(PV) @n &
-       Create(Coordinator) @o
-            & not(Ex agent #p. Create(agent) @p & not(#p = #m) & not(#p = #n) & not(#p = #o) ) 
+       Create(VF,'Verifier') @m &
+       Create(PV,'Prover') @n &
+       Create(Coordinator,'Coordinator') @o
+            & not(Ex agent role #p. Create(agent,role) @p & not(#p = #m) & not(#p = #n) & not(#p = #o) ) 
             & not(Ex A #r. PrivateKeyRevealed(A) @r)
 "
 
