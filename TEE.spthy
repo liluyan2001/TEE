@@ -145,7 +145,7 @@ rule CD_RG_01 [colour=#da6bff]:
 
 rule VF_RG_02 [colour=#adfaff]:
     let
-        vf_cert = <$VF, vf_public_key, vfCertSignCoordinator>
+        vf_cert = <$VF, pk(private_key_vf), vfCertSignCoordinator>
         root_cert = <$Coordinator, coordinator_public_key, rootCertSignCoordinator>
         k_dh =(DH_pk_PV)^DH_sk_VF
     in
@@ -154,7 +154,7 @@ rule VF_RG_02 [colour=#adfaff]:
         Verifier_01($VF, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
     --[ 
-        Eq(verify(vfCertSignCoordinator,<$VF,vf_public_key>,coordinator_public_key),true),
+        Eq(verify(vfCertSignCoordinator,<$VF,pk(private_key_vf)>,coordinator_public_key),true),
         Eq(verify(rootCertSignCoordinator,<$Coordinator,coordinator_public_key>,coordinator_public_key),true),
         Step3_VF($VF,$Coordinator,k_dh,root_cert,vf_cert)
     ]->
@@ -164,7 +164,7 @@ rule VF_RG_02 [colour=#adfaff]:
 
 rule PV_RG_02 [colour=#ff9900]:
     let
-        pv_cert = <$PV, pv_public_key, pvCertSignCoordinator>
+        pv_cert = <$PV, pk(private_key_pv), pvCertSignCoordinator>
         root_cert = <$Coordinator, coordinator_public_key, rootCertSignCoordinator>
         k_dh =(DH_pk_VF)^DH_sk_PV
     in
@@ -173,7 +173,7 @@ rule PV_RG_02 [colour=#ff9900]:
         Prover_01($PV, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
      ]
     --[ 
-        Eq(verify(pvCertSignCoordinator,<$PV, pv_public_key>,coordinator_public_key),true),
+        Eq(verify(pvCertSignCoordinator,<$PV, pk(private_key_pv)>,coordinator_public_key),true),
         Eq(verify(rootCertSignCoordinator,<$Coordinator,coordinator_public_key>,coordinator_public_key),true),
         Step3_PV($PV,$Coordinator,k_dh,root_cert,pv_cert)
      ]->
@@ -336,10 +336,10 @@ restriction private_key_unique:
 lemma correctness_trace:
      exists-trace
 "
-    Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert 
-       #a #b #c  #m #n #o.
-    //    nonce report   k_dh
-    //     #d  #e #f #g #i #j #k #l
+    Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert k_dh
+       #a #b #c #d #m #n #o.
+    //    nonce report   
+    //       #e #f #g #i #j #k #l
        Step1_VF(VF,Coordinator,vf_public_key) @a &
        Step1_PV(PV,Coordinator,pv_public_key) @b &(a<b) &
        Step2(Coordinator,PV,VF,root_cert,vf_cert,pv_cert) @c &(b<c) &
@@ -357,6 +357,4 @@ lemma correctness_trace:
             // & not(Ex agent role #p. Create(agent,role) @p & not(#p = #m) & not(#p = #n) & not(#p = #o) ) 
             & not(Ex A #r. PrivateKeyRevealed(A) @r)
 "
-
-
 end
