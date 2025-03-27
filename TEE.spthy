@@ -1,7 +1,6 @@
 theory TEE
 begin
 
-
 builtins:  asymmetric-encryption, signing, diffie-hellman,symmetric-encryption,hashing
 functions: blind/2, unblind/2
 equations: unblind( sign(blind(m,r),k),r ) = sign(m,k),
@@ -94,6 +93,8 @@ rule ChanIn_S:
 /* 
 
 */
+
+//VF -> Coordinator  <$VF,vf_public_key,'g'^DH_sk_VF>
 rule VF_RG_01 [colour=#adfaff]: 
     [
         Verifier_0($VF, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
@@ -107,7 +108,8 @@ rule VF_RG_01 [colour=#adfaff]:
         OutS($VF, $Coordinator, <$VF, pk(private_key_vf), 'g'^DH_sk_VF>)
     ]
 
-rule PV_RG_01 [colour=#ff9900]:
+//VF -> Coordinator  <$PV,pv_public_key,'g'^DH_sk_PV>
+rule PV_RG_01 [colour=#ff9900]: 
     [ 
         Prover_0($PV, private_key_pv, DH_sk_PV,  $Coordinator, coordinator_public_key)
     ]
@@ -120,7 +122,13 @@ rule PV_RG_01 [colour=#ff9900]:
         OutS($PV, $Coordinator, <$PV, pk(private_key_pv), 'g'^DH_sk_PV>)
     ]
 
-rule CD_RG_01 [colour=#da6bff]:
+
+/* 
+  receive <$VF,vf_public_key,'g'^DH_sk_VF> and <$PV,pv_public_key,'g'^DH_sk_PV>
+  Coordinator -> VF <vf_cert,root_cert, DH_pk_PV>
+  Coordinator -> PV <pv_cert,root_cert, DH_pk_VF>
+*/
+rule CD_RG_01 [colour=#da6bff]: 
     let
         ID_PK_VF = <$VF, vf_public_key>
         ID_PK_PV = <$PV, pv_public_key>
@@ -143,6 +151,7 @@ rule CD_RG_01 [colour=#da6bff]:
         Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
     ]
 
+// receive <vf_cert,root_cert, DH_pk_PV>
 rule VF_RG_02 [colour=#adfaff]:
     let
         vf_cert = <$VF, pk(private_key_vf), vfCertSignCoordinator>
@@ -162,6 +171,7 @@ rule VF_RG_02 [colour=#adfaff]:
         Verifier_02($VF,k_dh,vf_cert,root_cert, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
     ]
 
+// receive <pv_cert,root_cert, DH_pk_VF>    
 rule PV_RG_02 [colour=#ff9900]:
     let
         pv_cert = <$PV, pk(private_key_pv), pvCertSignCoordinator>
@@ -183,6 +193,8 @@ rule PV_RG_02 [colour=#ff9900]:
 
 
 // ****************** Protocol ******************
+
+//VF -> PV senc(nonce,k_dh)
 rule VF_1 [colour=#adfaff]:
     let
         ct = senc(~nonce,k_dh)
@@ -198,6 +210,7 @@ rule VF_1 [colour=#adfaff]:
         Verifier_03($VF,k_dh,vf_cert,root_cert,~nonce, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
 
+//PV -> coordinator <report,sig = sign(msg2,private_key_pv), msg2 = <$PV,pv_cert,bm1> >     
 rule PV_1 [colour=#ff9900]:
     let
         nonce = sdec(ct,k_dh)
@@ -259,6 +272,7 @@ rule Coordinator_deny [colour=#da6bff]:       //attest := 'failure'
         Coordinator_02($Coordinator, 'failure', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
 ]
 
+//Coordinator -> PV <attest,btk>   
 rule Coordinator_2 [colour=#da6bff]:
     let
         btk = sign(bm1,private_key_coordinator)
@@ -276,6 +290,7 @@ rule Coordinator_2 [colour=#da6bff]:
         Coordinator_03($Coordinator, attest, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
      ]
 
+//PV -> Coordinator <attest,utk,report>      
 rule PV_2 [colour=#ff9900]:
     let
         utk = unblind(btk,r)
@@ -295,6 +310,7 @@ rule PV_2 [colour=#ff9900]:
         Out(<attest,utk,report>)
      ]
 
+//receive <attest,utk,report>     
 rule VF_2 [colour=#adfaff]:
     let
         msg1 =  <report,nonce>
