@@ -20,13 +20,6 @@ rule Reveal_private_key:    // Revealing private key
   --[ PrivateKeyRevealed(A) ]->
     [ Out(private_key) ]
     
-// rule Generate_DH_key_pair: // Registering a DH key
-//     [ Fr(~x) ] 
-//     --> 
-//     [ !Get_dh_private_key($A, ~x),
-//       !Get_dh_public_key($A, 'g'^~x),
-//       Out('g'^~x)
-//     ]
 
 // ****************** Roles ******************
 rule Init_Attestation_DatabPVe:       //meaurements
@@ -229,8 +222,9 @@ rule PV_1 [colour=#ff9900]:
     --[ 
         Honest($PV),
         Honest($VF),
-        AttestStarted($PV,nonce,report),
+        AttestStarted($PV,nonce),
         Running($PV,$VF,nonce),
+        Secret_blind(~r),
         Step5($PV,$VF,nonce,report)
     ]->
     [ 
@@ -302,7 +296,6 @@ rule PV_2 [colour=#ff9900]:
         Prover_03($PV,r, k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
      ]
     --[
-        // Eq(verify(btk,bm1,coordinator_public_key),true),
         Eq(verify(utk,h(msg1)^k_dh,coordinator_public_key),true),
         Step8($PV,$Coordinator,$VF,attest),
         NotifiedCompletion($PV, $Coordinator, attest)
@@ -323,7 +316,6 @@ rule VF_2 [colour=#adfaff]:
         !Get_private_key($Coordinator, private_key_coordinator)
     ]
     --[ 
-        // Eq(verify(btk,bm1,coordinator_public_key),true),
         Eq(verify(utk,h(msg1)^k_dh,coordinator_public_key),true),
         Commit($VF, $PV, nonce, attest),
         AttestRecieved($VF, $Coordinator, $PV, nonce, attest),
@@ -333,7 +325,8 @@ rule VF_2 [colour=#adfaff]:
         Step9($VF, $PV, $Coordinator, nonce, attest),
         Secret(private_key_vf),
         Secret(private_key_prover),
-        Secret(private_key_coordinator)
+        Secret(private_key_coordinator),
+        Secret_nonce(nonce)
      ]->
     []
 
@@ -347,31 +340,71 @@ restriction private_key_unique:
     "All x #i #j. KeyReg(x) @#i & KeyReg(x) @#j 
         ==> #i = #j"
 
+restriction blind_secret:
+    "All r #i.Secret_blind(r) @#i 
+        ==> not(Ex #j. K(r) @j)"
+
 // ****************** Security Properties ******************
 
-//Correctness Trace
-lemma correctness_trace:
-     exists-trace
-"
-    Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert k_dh nonce report
-       #a #b #c #d #e #f #g #i #j  #k #l #m #n #o.
-    //        
-    //           
-       Step1_VF(VF,Coordinator,vf_public_key) @a &
-       Step1_PV(PV,Coordinator,pv_public_key) @b &(a<b) &
-       Step2(Coordinator,PV,VF,root_cert,vf_cert,pv_cert) @c &(b<c) &
-       Step3_VF(VF,Coordinator,k_dh,root_cert,vf_cert) @d & (c<d) &
-       Step3_PV(PV,Coordinator,k_dh,root_cert,pv_cert) @e &(d<e) &
-       Step4(VF, PV, nonce) @f & (e<f) &
-       Step5(PV,VF,nonce,report) @g & (f<g) &
-       Step6(Coordinator,PV) @i & (g<i) &
-       Step7(PV,Coordinator) @j & (i<j) &
-       Step8(PV,Coordinator,VF,'success') @k & (j<k) &
-       Step9(VF, PV, Coordinator, nonce, 'success') @l & (k<l)&
-       Create(VF,'Verifier') @m &
-       Create(PV,'Prover') @n &
-       Create(Coordinator,'Coordinator') @o
-            // & not(Ex agent role #p. Create(agent,role) @p & not(#p = #m) & not(#p = #n) & not(#p = #o) ) 
-            & not(Ex A #r. PrivateKeyRevealed(A) @r)
-"
+/*
+* Correctness Trace
+* 
+* We verify for all models that there is a trace where the protocol completes
+* where every step of the trace happens exactly in the expected order
+*/
+// lemma correctness_trace:
+//      exists-trace
+// "
+//     Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert k_dh nonce report
+//        #a #b #c #d #e #f #g #i #j  #k #l #m #n #o.
+//     //        
+//     //           
+//        Step1_VF(VF,Coordinator,vf_public_key) @a &
+//        Step1_PV(PV,Coordinator,pv_public_key) @b &(a<b) &
+//        Step2(Coordinator,PV,VF,root_cert,vf_cert,pv_cert) @c &(b<c) &
+//        Step3_VF(VF,Coordinator,k_dh,root_cert,vf_cert) @d & (c<d) &
+//        Step3_PV(PV,Coordinator,k_dh,root_cert,pv_cert) @e &(d<e) &
+//        Step4(VF, PV, nonce) @f & (e<f) &
+//        Step5(PV,VF,nonce,report) @g & (f<g) &
+//        Step6(Coordinator,PV) @i & (g<i) &
+//        Step7(PV,Coordinator) @j & (i<j) &
+//        Step8(PV,Coordinator,VF,'success') @k & (j<k) &
+//        Step9(VF, PV, Coordinator, nonce, 'success') @l & (k<l)&
+//        Create(VF,'Verifier') @m &
+//        Create(PV,'Prover') @n &
+//        Create(Coordinator,'Coordinator') @o
+//             // & not(Ex agent role #p. Create(agent,role) @p & not(#p = #m) & not(#p = #n) & not(#p = #o) ) 
+//             & not(Ex A #r. PrivateKeyRevealed(A) @r)
+// "
+
+
+// // Aliveness
+// lemma aliveness_verif_attag:
+//     "All VF PV nonce attest #i. 
+//         Commit(VF, PV, nonce, attest) @i 
+//         ==>  ( Ex nonce2 #j. AttestStarted(PV, nonce2) @j ) 
+//         | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+
+/*
+===========================
+Secrecy
+===========================
+*/
+
+// L6 Secrecy Attestation Keys
+lemma secrecy_key:
+    "All x #i.
+        Secret(x) @i 
+        ==> not (Ex #j. K(x) @j)
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+
+//
+lemma secrecy_nonce:
+    "All x #i.
+        Secret_nonce(x) @i 
+        ==> not (Ex #j. K(x) @j)
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
 end
