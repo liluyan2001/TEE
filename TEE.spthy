@@ -209,7 +209,8 @@ rule PV_1 [colour=#ff9900]:
     let
         nonce = sdec(ct,k_dh)
         msg1 = <report,nonce>
-        bm1 = blind(h(msg1)^k_dh,~r)
+        // bm1 = blind(h(msg1)^k_dh,~r)
+        bm1 = h(msg1)^k_dh
         msg2 = <$PV,pv_cert,bm1>
         sig = sign(msg2,private_key_pv)
         flow_1 = <report,sig,msg2>
@@ -222,9 +223,10 @@ rule PV_1 [colour=#ff9900]:
     --[ 
         Honest($PV),
         Honest($VF),
+        // Out_PV_1(msg2),//为了消除部分解构
         AttestStarted($PV,nonce),
         Running($PV,$VF,nonce),
-        Secret_blind(~r),
+        // Secret_blind(~r),
         Step5($PV,$VF,nonce,report)
     ]->
     [ 
@@ -242,6 +244,7 @@ rule Coordinator_1 [colour=#da6bff]:          //attest := 'success'
    ]
   --[ 
         Eq(verify(sig,msg2,pv_public_key),true),
+        // In_coordinator_1_success(bm1,msg2),//为了消除部分解构
         Commit_report($Coordinator,$PV,report),
         Honest($Coordinator),
         Honest($PV),
@@ -262,6 +265,7 @@ rule Coordinator_deny [colour=#da6bff]:       //attest := 'failure'
    ]
   --[ 
         Eq(verify(sig,msg2,pv_public_key),true)
+        // In_coordinator_1_failure(bm1,msg2)//为了消除部分解构
    ]->
   [     
         Coordinator_02($Coordinator, 'failure', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
@@ -288,7 +292,8 @@ rule Coordinator_2 [colour=#da6bff]:
 //PV -> Coordinator <attest,utk,report>      
 rule PV_2 [colour=#ff9900]:
     let
-        utk = unblind(btk,r)
+        // utk = unblind(btk,r)
+        utk = btk
         msg1 = <report,nonce>
     in
     [ 
@@ -340,10 +345,28 @@ restriction private_key_unique:
     "All x #i #j. KeyReg(x) @#i & KeyReg(x) @#j 
         ==> #i = #j"
 
-restriction blind_secret:
-    "All r #i.Secret_blind(r) @#i 
-        ==> not(Ex #j. K(r) @j)"
+// restriction blind_secret:
+//     "All r #i.Secret_blind(r) @#i 
+//         ==> not(Ex #j. K(r) @j)"
 
+
+// lemma types [sources]:
+//   " (All bm1 msg2 #i.
+//     In_coordinator_1_success(bm1,msg2) @ i
+//        ==>
+//        ( (Ex #j. Out_PV_1(msg2) @ j & j < i)
+//        )
+//     )
+// (Ex #j. KU(bm1) @ j & j < i)
+// | 
+//   & (All nbmr m2 #i.
+//        IN_I_2_nr( nr, m2) @ i
+//        ==>
+//        ( (Ex #j. KU(nr) @ j & j < i)
+//        | (Ex #j. OUT_R_1( m2 ) @ j & j < i)
+//        )
+//     )
+  "
 // ****************** Security Properties ******************
 
 /*
