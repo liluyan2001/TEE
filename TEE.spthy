@@ -204,16 +204,15 @@ rule VF_1 [colour=#adfaff]:
         Verifier_03($VF,k_dh,vf_cert,root_cert,~nonce, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
 
-//PV -> coordinator <report,sig = sign(msg2,private_key_pv), msg2 = <$PV,pv_cert,bm1> >     
+//PV -> coordinator <report,sig = sign(bm1,private_key_pv), bm1>     
 rule PV_1 [colour=#ff9900]:
     let
         nonce = sdec(ct,k_dh)
         msg1 = <report,nonce>
         bm1 = blind(h(msg1)^k_dh,~r)
         // bm1 = h(msg1)^k_dh
-        msg2 = <$PV,pv_cert,bm1>
-        sig = sign(msg2,private_key_pv)
-        flow_1 = <report,sig,msg2>
+        sig = sign(bm1,private_key_pv)
+        flow_1 = <report,sig,bm1>
     in
     [   In(ct),
         Fr(~r),
@@ -223,7 +222,7 @@ rule PV_1 [colour=#ff9900]:
     --[ 
         Honest($PV),
         Honest($VF),
-        Blind_secret(~r,bm1),
+        PV_OUT(bm1,sig),
         AttestStarted($PV,nonce),
         Running($PV,$VF,nonce),
         Secret_blind(~r,sig),
@@ -235,15 +234,14 @@ rule PV_1 [colour=#ff9900]:
     ]
 
 rule Coordinator_1 [colour=#da6bff]:          //attest := 'success'
-    let
-        msg2 = <$PV,pv_cert,bm1>
-    in
-   [    Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
-        In(<report,sig,msg2>),
+   [    
+        Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
+        In(<report,sig,bm1>),
         !Get_expected_SML(report)
    ]
   --[ 
-        Eq(verify(sig,msg2,pv_public_key),true),
+        Eq(verify(sig,bm1,pv_public_key),true),
+        CD_IN(bm1,sig),
         Commit_report($Coordinator,$PV,report),
         Honest($Coordinator),
         Honest($PV),
@@ -254,15 +252,12 @@ rule Coordinator_1 [colour=#da6bff]:          //attest := 'success'
    ]
 
 rule Coordinator_deny [colour=#da6bff]:       //attest := 'failure'
-  let
-        msg2 = <id_PV,pv_cert,bm1>
-  in
   [ 
         Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
-        In(<report,$PV,sig,msg2>)//多一个变量
+        In(<report,$PV,sig,bm1>)//多一个变量
    ]
   --[ 
-        Eq(verify(sig,msg2,pv_public_key),true)
+        Eq(verify(sig,bm1,pv_public_key),true)
    ]->
   [     
         Coordinator_02($Coordinator, 'failure', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
@@ -345,12 +340,28 @@ restriction private_key_unique:
         ==> #i = #j"
 
 
-// lemma types [sources]:
-//   " (All r bm #i. Blind_secret(r,bm) @#i
+
+
+lemma types [sources]:
+let 
+    bm = blind(msg,r)
+in
+  " (All bm sig  #i.
+        CD_IN(bm,sig) @ i
+       ==>
+       ( (Ex r #j. KU(r) @ j & j < i)
+       | (Ex #j. PV_OUT( bm, sig) @ j)
+       )
+    )
+"
+//   & (All nr m2 #i.
+//        IN_I_2_nr( nr, m2) @ i
 //        ==>
-//        not(Ex #j #m. K(r) @#j & K(bm)@#m)
+//        ( (Ex #j. KU(nr) @ j & j < i)
+//        | (Ex #j. OUT_R_1( m2 ) @ j)
+//        )
 //     )
-//   "
+
 // ****************** Security Properties ******************
 
 /*
