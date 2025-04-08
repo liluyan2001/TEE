@@ -2,7 +2,7 @@ theory TEE
 begin
 
 builtins:  asymmetric-encryption, signing, diffie-hellman,symmetric-encryption,hashing
-functions: blind/2, unblind/2
+functions: blind/2 [private], unblind/2 [private]
 equations: unblind( sign(blind(m,r),k),r ) = sign(m,k),
            unblind( blind(m,r),r ) = m
 // ****************** Keys ******************
@@ -222,10 +222,9 @@ rule PV_1 [colour=#ff9900]:
     --[ 
         Honest($PV),
         Honest($VF),
-        PV_OUT(bm1,sig),
+        PV_OUT(bm1,nonce,sig),
         AttestStarted($PV,nonce),
         Running($PV,$VF,nonce),
-        Secret_blind(~r,sig),
         Step5($PV,$VF,nonce,report)
     ]->
     [ 
@@ -342,18 +341,16 @@ restriction private_key_unique:
 
 
 
-lemma types [sources]:
-let 
-    bm = blind(msg,r)
-in
-  " (All bm sig  #i.
-        CD_IN(bm,sig) @ i
-       ==>
-       ( (Ex r #j. KU(r) @ j & j < i)
-       | (Ex #j. PV_OUT( bm, sig) @ j)
-       )
-    )
-"
+// lemma types [sources]:
+//   " (
+//     All bm sig nonce r #i.
+//         CD_IN(bm,sig) @ i
+//        ==>
+//        ( (Ex #j. KU(r) @ j & j < i)
+//        | (Ex #j. PV_OUT(bm,nonce,sig) @ j & j < i)
+//        )
+//     )
+// "
 //   & (All nr m2 #i.
 //        IN_I_2_nr( nr, m2) @ i
 //        ==>
@@ -419,10 +416,10 @@ lemma secrecy_key:
 
 
 //
-lemma secrecy_nonce:
-    "All x #i.
-        Secret_nonce(x) @i 
-        ==> not (Ex #j. K(x) @j)
-        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+// lemma secrecy_nonce:
+//     "All x #i.
+//         Secret_nonce(x) @i 
+//         ==> not (Ex #j. K(x) @j)
+//         | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
 
 end
