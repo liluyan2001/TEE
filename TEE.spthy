@@ -2,9 +2,9 @@ theory TEE
 begin
 
 builtins:  asymmetric-encryption, signing, diffie-hellman,symmetric-encryption,hashing
-functions: blind/2, unblind/2
-equations: unblind( sign(blind(m,r),k),r ) = sign(m,k),
-           unblind( blind(m,r),r ) = m
+// functions: blind/2, unblind/2 
+// equations: unblind( sign(blind(m,r),k),r ) = sign(m,k),
+//            unblind( blind(m,r),r ) = m
 // ****************** Keys ******************
 rule Register_pk:           // Registering a public key
     [ Fr(~private_key) ]
@@ -19,14 +19,7 @@ rule Reveal_private_key:    // Revealing private key
     [ !Get_private_key(A, private_key) ]
   --[ PrivateKeyRevealed(A) ]->
     [ Out(private_key) ]
-    
-// rule Generate_DH_key_pair: // Registering a DH key
-//     [ Fr(~x) ] 
-//     --> 
-//     [ !Get_dh_private_key($A, ~x),
-//       !Get_dh_public_key($A, 'g'^~x),
-//       Out('g'^~x)
-//     ]
+   
 
 // ****************** Roles ******************
 rule Init_Attestation_DatabPVe:       //meaurements
@@ -42,7 +35,7 @@ rule Init_VF:
     ]
   --[ Create($VF,'Verifier'),
       OnlyOnceV(<$VF,'Init'>) ]->
-    [ Verifier_0($VF, private_key_vf, ~DH_sk_VF, $Coordinator, coordinator_public_key) 
+    [ Verifier_0($VF, private_key_vf, ~DH_sk_VF, $Coordinator, coordinator_public_key)
     ]
 
 rule Init_PV:
@@ -154,7 +147,8 @@ rule CD_RG_01 [colour=#da6bff]:
 // receive <vf_cert,root_cert, DH_pk_PV>
 rule VF_RG_02 [colour=#adfaff]:
     let
-        vf_cert = <$VF, pk(private_key_vf), vfCertSignCoordinator>
+        ID_PK_VF = <$VF, pk(private_key_vf)>
+        vf_cert = <ID_PK_VF, vfCertSignCoordinator>
         root_cert = <$Coordinator, coordinator_public_key, rootCertSignCoordinator>
         k_dh =(DH_pk_PV)^DH_sk_VF
     in
@@ -163,7 +157,7 @@ rule VF_RG_02 [colour=#adfaff]:
         Verifier_01($VF, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
     --[ 
-        Eq(verify(vfCertSignCoordinator,<$VF,pk(private_key_vf)>,coordinator_public_key),true),
+        Eq(verify(vfCertSignCoordinator,ID_PK_VF,coordinator_public_key),true),
         Eq(verify(rootCertSignCoordinator,<$Coordinator,coordinator_public_key>,coordinator_public_key),true),
         Step3_VF($VF,$Coordinator,k_dh,root_cert,vf_cert)
     ]->
@@ -174,7 +168,8 @@ rule VF_RG_02 [colour=#adfaff]:
 // receive <pv_cert,root_cert, DH_pk_VF>    
 rule PV_RG_02 [colour=#ff9900]:
     let
-        pv_cert = <$PV, pk(private_key_pv), pvCertSignCoordinator>
+        ID_PK_PV = <$PV, pk(private_key_pv)>
+        pv_cert = <ID_PK_PV, pvCertSignCoordinator>
         root_cert = <$Coordinator, coordinator_public_key, rootCertSignCoordinator>
         k_dh =(DH_pk_VF)^DH_sk_PV
     in
@@ -183,14 +178,13 @@ rule PV_RG_02 [colour=#ff9900]:
         Prover_01($PV, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
      ]
     --[ 
-        Eq(verify(pvCertSignCoordinator,<$PV, pk(private_key_pv)>,coordinator_public_key),true),
+        Eq(verify(pvCertSignCoordinator,ID_PK_PV,coordinator_public_key),true),
         Eq(verify(rootCertSignCoordinator,<$Coordinator,coordinator_public_key>,coordinator_public_key),true),
         Step3_PV($PV,$Coordinator,k_dh,root_cert,pv_cert)
      ]->
     [ 
         Prover_02($PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
     ]
-
 
 // ****************** Protocol ******************
 
@@ -210,63 +204,57 @@ rule VF_1 [colour=#adfaff]:
         Verifier_03($VF,k_dh,vf_cert,root_cert,~nonce, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key)
      ]
 
-//PV -> coordinator <report,sig = sign(msg2,private_key_pv), msg2 = <$PV,pv_cert,bm1> >     
+//PV -> coordinator <report,sig = sign(bm1,private_key_pv), bm1>     
 rule PV_1 [colour=#ff9900]:
     let
         nonce = sdec(ct,k_dh)
         msg1 = <report,nonce>
-        bm1 = blind(<h(msg1),k_dh>,~r)
-        msg2 = <$PV,pv_cert,bm1>
-        sig = sign(msg2,private_key_pv)
-        flow_1 = <report,sig,msg2>
+        bm1 = h(msg1)^k_dh
+        sig = sign(bm1,private_key_pv)
+        flow_1 = <report,sig,bm1>
     in
     [   In(ct),
-        Fr(~r),
         Prover_02($PV, k_dh,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key),
         !Get_expected_SML(report)
      ]
     --[ 
         Honest($PV),
         Honest($VF),
-        AttestStarted($PV,nonce,report),
+        PV_OUT(bm1,sig),
+        AttestStarted($PV,nonce),
         Running($PV,$VF,nonce),
         Step5($PV,$VF,nonce,report)
     ]->
     [ 
         Out(flow_1),
-        Prover_03($PV,~r, k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
+        Prover_03($PV,k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
     ]
 
 rule Coordinator_1 [colour=#da6bff]:          //attest := 'success'
-    let
-        msg2 = <$PV,pv_cert,bm1>
-    in
-   [    Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
-        In(<report,sig,msg2>),
+   [    
+        Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
+        In(<report,sig,bm1>),
         !Get_expected_SML(report)
    ]
   --[ 
-        Eq(verify(sig,msg2,pv_public_key),true),
+        Eq(verify(sig,bm1,pv_public_key),true),
+        CD_IN(bm1,sig),
         Commit_report($Coordinator,$PV,report),
         Honest($Coordinator),
         Honest($PV),
         Step6($Coordinator,$PV)
-        // Step6(Coordinator,PV,bm1)
    ]->
   [ 
         Coordinator_02($Coordinator, 'success', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
    ]
 
 rule Coordinator_deny [colour=#da6bff]:       //attest := 'failure'
-  let
-        msg2 = <id_PV,pv_cert,bm1>
-  in
   [ 
         Coordinator_01($Coordinator, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key),
-        In(<report,$PV,sig,msg2>)//多一个变量
+        In(<report,$PV,sig,bm1>)//多一个变量
    ]
   --[ 
-        Eq(verify(sig,msg2,pv_public_key),true)
+        Eq(verify(sig,bm1,pv_public_key),true)
    ]->
   [     
         Coordinator_02($Coordinator, 'failure', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
@@ -276,6 +264,7 @@ rule Coordinator_deny [colour=#da6bff]:       //attest := 'failure'
 rule Coordinator_2 [colour=#da6bff]:
     let
         btk = sign(bm1,private_key_coordinator)
+        // signature = sign(attest,private_key_coordinator)
     in
     [ 
         Coordinator_02($Coordinator, attest, bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
@@ -283,56 +272,55 @@ rule Coordinator_2 [colour=#da6bff]:
     --[ 
         AttestCreated($Coordinator,$PV,attest),
         Step7($PV,$Coordinator)
-        // Step7(PV,Coordinator,btk)
      ]->
     [ 
         Out(<attest,btk>),
         Coordinator_03($Coordinator, attest, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
      ]
 
-//PV -> Coordinator <attest,utk,report>      
+//PV -> Coordinator <attest,btk,report>      
 rule PV_2 [colour=#ff9900]:
     let
-        utk = unblind(btk,r)
         msg1 = <report,nonce>
     in
     [ 
         In(<attest,btk>),
-        Prover_03($PV,r, k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
+        Prover_03($PV, k_dh,nonce,report,bm1,pv_cert,root_cert, private_key_pv, DH_sk_PV, $Coordinator, coordinator_public_key)
      ]
     --[
-        // Eq(verify(btk,bm1,coordinator_public_key),true),
-        Eq(verify(utk,<h(msg1),k_dh>,coordinator_public_key),true),
+        Eq(verify(btk,h(msg1)^k_dh,coordinator_public_key),true),
+        // Eq(verify(signature,attest,coordinator_public_key),true),
         Step8($PV,$Coordinator,$VF,attest),
         NotifiedCompletion($PV, $Coordinator, attest)
       ]->
     [ 
-        Out(<attest,utk,report>)
+        Out(<attest,btk,report>)
      ]
 
-//receive <attest,utk,report>     
+//receive <attest,btk,report>     
 rule VF_2 [colour=#adfaff]:
     let
         msg1 =  <report,nonce>
     in
     [ 
-        In(<attest,utk,report>),
+        In(<attest,btk,report>),
         Verifier_03($VF,k_dh,vf_cert,root_cert,nonce, private_key_vf, DH_sk_VF, $Coordinator, coordinator_public_key),
         !Get_private_key($PV, private_key_prover),
         !Get_private_key($Coordinator, private_key_coordinator)
     ]
     --[ 
-        // Eq(verify(btk,bm1,coordinator_public_key),true),
-        Eq(verify(utk,<h(msg1),k_dh>,coordinator_public_key),true),
+        Eq(verify(btk,h(msg1)^k_dh,coordinator_public_key),true),
         Commit($VF, $PV, nonce, attest),
         AttestRecieved($VF, $Coordinator, $PV, nonce, attest),
         Honest($VF),
         Honest($Coordinator),
         Honest($PV),
         Step9($VF, $PV, $Coordinator, nonce, attest),
+        Secret_dh(k_dh),
         Secret(private_key_vf),
         Secret(private_key_prover),
-        Secret(private_key_coordinator)
+        Secret(private_key_coordinator),
+        Secret_nonce(nonce)
      ]->
     []
 
@@ -348,29 +336,27 @@ restriction private_key_unique:
 
 // ****************** Security Properties ******************
 
-//Correctness Trace
-lemma correctness_trace:
-     exists-trace
-"
-    Ex VF Coordinator PV vf_public_key pv_public_key root_cert vf_cert pv_cert k_dh
-       #a #b #c #d #m #n #o.
-    //    nonce report   
-    //       #e #f #g #i #j #k #l
-       Step1_VF(VF,Coordinator,vf_public_key) @a &
-       Step1_PV(PV,Coordinator,pv_public_key) @b &(a<b) &
-       Step2(Coordinator,PV,VF,root_cert,vf_cert,pv_cert) @c &(b<c) &
-       Step3_VF(VF,Coordinator,k_dh,root_cert,vf_cert) @d & (c<d) &
-    //    Step3_PV(PV,Coordinator,k_dh,root_cert,pv_cert) @e &(d<e) &
-    //    Step4(VF, PV, nonce) @f & (e<f) &
-    //    Step5(PV,VF,nonce,report) @g & (f<g) &
-    //    Step6(Coordinator,PV) @i & (g<i) &
-    //    Step7(PV,Coordinator) @j & (i<j) &
-    //    Step8(PV,Coordinator,VF,'success') @k & (j<k) &
-    //    Step9(VF, PV, Coordinator, nonce, 'success') @l & (k<l)&
-       Create(VF,'Verifier') @m &
-       Create(PV,'Prover') @n &
-       Create(Coordinator,'Coordinator') @o
-            // & not(Ex agent role #p. Create(agent,role) @p & not(#p = #m) & not(#p = #n) & not(#p = #o) ) 
-            & not(Ex A #r. PrivateKeyRevealed(A) @r)
-"
+
+
+// One-Way Non-Injective Agreement
+lemma o_w_n_i_agree_vf_pv:
+    "All VF prover nonce attest #i. 
+        Commit(VF, prover, nonce, attest) @i 
+        ==>  ( Ex #j. AttestStarted(prover, nonce) @j ) 
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+/*
+===========================
+Secrecy
+===========================
+*/
+
+// L6 Secrecy Attestation Keys
+lemma secrecy_key:
+    "All x #i.
+        Secret(x) @i 
+        ==> not (Ex #j. K(x) @j)
+        | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
+
+
+
 end
