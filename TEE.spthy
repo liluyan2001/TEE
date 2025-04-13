@@ -20,10 +20,6 @@ rule Reveal_private_key:    // Revealing private key
   --[ PrivateKeyRevealed(A) ]->
     [ Out(private_key) ]
 
-// rule Reveal_dh_key:    // Revealing dh key
-//     [ Get_dh_key(A, k_dh) ]
-//   --[ DHKeyRevealed(A) ]->
-//     [ Out(k_dh) ]
     
 
 // ****************** Roles ******************
@@ -217,7 +213,8 @@ rule VF_1 [colour=#adfaff]:
         Verifier_02($VF,k_dh,private_key_vf, DH_sk_VF, $PV,$Coordinator, coordinator_public_key)
      ]
   --[ 
-        Step4($VF, $PV, ~nonce)
+        Step4($VF, $PV, ~nonce),
+        ProtocolStarted($VF, $PV, ~nonce)
      ]->
     [   Out(ct),
         Verifier_03($VF,k_dh,~nonce, private_key_vf, $PV,$Coordinator, coordinator_public_key)
@@ -242,7 +239,7 @@ rule PV_1 [colour=#ff9900]:
     --[ 
         Honest($PV),
         Honest($VF),
-        Blinders(~r),
+        ReportCreated($PV, report),
         AttestStarted($PV,nonce),
         Running($PV,$VF,nonce),
         Step5($PV,$VF,nonce,report)
@@ -398,33 +395,20 @@ lemma correctness_trace:
             & not(Ex A #r. PrivateKeyRevealed(A) @r)
 "
 
-
-
-// // One-Way Injective Agreement
-// lemma o_w_i_agree_verif_attag:
-//     "All VF PV nonce attest #i. 
-//         Commit(VF, PV, nonce, attest) @i 
-//         ==>  ( Ex #j. AttestStarted(PV, nonce) @j
-//                 & j < i 
-//                 & not (Ex VF2 PV2 #i2. Commit(VF2, PV2, nonce, attest) @i2
-//                     & not (#i2 = #i)))
-//         | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
-
-
 /*
 ===========================
 Authenticity of prover
 ===========================
 */
-// L1 One Way Injective Agreement - Verifier - Attestation Agent
-lemma o_w_r_i_agree_verif_attag:
-    "All VF prover nonce1 nonce2 verdict #i. 
-        Commit(VF, prover, <nonce1, nonce2>, verdict) @i
-        ==>  ( Ex #j #k. AttestStarted(prover, <nonce1, nonce2>) @j
-                & ProtocolStarted(VF, prover, nonce1) @k
+// S1.1 One Way Injective Agreement - Verifier - Prover
+lemma S1_1_o_w_r_i_agree_verif_prover:
+    "All VF prover nonce attest #i. 
+        Commit(VF, prover, nonce, attest) @i
+        ==>  ( Ex #j #k. AttestStarted(prover, nonce) @j
+                & ProtocolStarted(VF, prover, nonce) @k
                 & k < j
                 & j < i
-                & not (Ex VF2 prover2 #i2. Commit(VF2, prover2, <nonce1, nonce2>, verdict) @i2
+                & not (Ex VF2 prover2 #i2. Commit(VF2, prover2, nonce, attest) @i2
                     & not (#i2 = #i)))
         | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
 /*
@@ -432,11 +416,11 @@ lemma o_w_r_i_agree_verif_attag:
 Authenticity of Verifier
 ===========================
 */
-// L3 Injective Agreement - Target - Verifier
-lemma inj_agree_target_verif:
+// S1.2 Injective Agreement - prover - Verifier
+lemma S1_2_inj_agree_prover_verif:
     "All prover VF nonce #i. 
         Running(prover, VF, nonce)  @i 
-        ==>  ( Ex #j. NonceConfirmed(VF, prover, nonce) @j
+        ==>  ( Ex #j. ProtocolStarted(VF, prover, nonce) @j
                 & j < i 
                 & not (Ex prover2 VF2 #i2. Running(prover2, VF2, nonce) @i2
                     & not (#i2 = #i)))
@@ -447,13 +431,13 @@ lemma inj_agree_target_verif:
 Authenticity of coordinator
 ===========================
 */
-// L5 One-Way Injective Agreement - Verifier - coordinator
-lemma o_w_i_agree_verif_server:
-    "All VF AS prover nonce verdict #i. 
-        VerdictRecieved(VF, AS, prover, nonce, verdict) @i 
-        ==>  ( Ex AS #j. VerdictCreated(AS, prover, nonce, verdict) @j
+// S1.3 One-Way Injective Agreement - Verifier - coordinator
+lemma S1_3_o_w_i_agree_verif_server:
+    "All VF CD prover nonce attest #i. 
+        AttestRecieved(VF, CD, prover, nonce, attest) @i 
+        ==>  ( Ex CD #j. AttestCreated(CD, prover,attest) @j
                 & j < i 
-                & not (Ex VF2 AS2 #i2. VerdictRecieved(VF2, AS2, prover, nonce, verdict) @i2
+                & not (Ex VF2 CD2 #i2. AttestRecieved(VF2, CD2, prover, nonce, attest) @i2
                     & not (#i2 = #i)))
         | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
 /*
@@ -462,11 +446,11 @@ Integrity of Attestation Data
 ================================
 */
 
-// L2 One-Way Non-Injective Agreement - Server - Attestation Agent
-lemma o_w_non_i_agree_server_attag:
-    "All AS prover nonce SML #i. 
-        Commit_SML(AS, prover, nonce, SML) @i
-        ==>  ( Ex #j. QuoteCreated(prover, nonce, SML) @j )
+// S2 One-Way Non-Injective Agreement - Server - Prover
+lemma S2_o_w_non_i_agree_server_prover:
+    "All CD prover report #i. 
+        Commit_report(CD, prover,report) @i
+        ==>  ( Ex #j. ReportCreated(prover, report) @j )
         | (Ex A #r. PrivateKeyRevealed(A) @r & Honest(A) @i)"
 
 /*
@@ -475,8 +459,8 @@ Secrecy
 ===========================
 */
 
-// L6 Secrecy Attestation Keys
-lemma secrecy_key:
+// S3 Secrecy Attestation Keys
+lemma S3_secrecy_key:
     "All x #i.
         Secret(x) @i 
         ==> not (Ex #j. K(x) @j)
