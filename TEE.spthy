@@ -253,7 +253,7 @@ rule Coordinator_1 [colour=#da6bff]:          //attest := 'success'
    ]->
   [ 
         Coordinator_02($Coordinator, 'success', bm1, private_key_coordinator, $PV, pv_public_key, $VF, vf_public_key)
-   ]
+   ] 
 
 rule Coordinator_deny [colour=#da6bff]:       //attest := 'failure'
   [ 
@@ -355,6 +355,7 @@ lemma types [sources]:
   )
    )
   "
+
 // ****************** Security Properties ******************
 
 /*
